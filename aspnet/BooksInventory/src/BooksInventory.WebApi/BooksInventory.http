@@ -1,0 +1,18 @@
+# Base URL
+@baseUrl = http://localhost:5000
+
+# Test POST /addBook
+POST {{baseUrl}}/addBook HTTP/1.1
+Content-Type: application/json
+
+{
+    "Title": "The Pragmatic Programmer",
+    "Author": "Andy Hunt and Dave Thomas",
+    "ISBN": "9780135957059"
+}
+
+###
+
+# Test GET /books/{id} (replace {id} with a valid BookId from the POST response)
+GET {{baseUrl}}/books/81d6905a-d518-403f-a5bd-312d34c97b0e HTTP/1.1
+Accept: application/json
