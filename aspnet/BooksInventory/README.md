@@ -1,17 +1,17 @@
 # Testing Minimal Web APIs with ASP.NET: A Developer's Guide
 
-In this article, we’ll explore how to test a minimal web API using a Book Inventory API as an example. We’ll also touch on practical techniques, including the use of extension methods and manual testing with REST Client and `.http` files, to simplify the process and make it more enjoyable.
+In this article, we’ll explore how to test a minimal web API using a Book Inventory API as an example. We’ll focus on practical techniques, including integration testing, manual testing with REST Client and `.http` files, and ways to avoid code clutter with extension methods.
 
-Let's dive right in!
+Let’s dive in!
 
 ---
 
-## Setting Up The Stage
+## Setting Up the Stage
 
-First we need to set up the stage, creating the solution, and the projects.
+First, create the solution and projects:
 
 ```bash
-dotnet sln new --name BooksInventory
+dotnet new sln --name BooksInventory
 
 mkdir src tests
 dotnet new web -o src/BooksInventory.WebApi
@@ -24,14 +24,16 @@ dotnet add tests/BooksInventory.WebApi.Tests package FluentAssertions
 dotnet add tests/BooksInventory.WebApi.Tests package Microsoft.AspNetCore.Mvc.Testing
 ```
 
+---
+
 ## Understanding the Book Inventory API
 
-The Book Inventory API provides two endpoints:
+The API provides two endpoints:
 
 - **POST `/addBook`**: Accepts a JSON payload with `Title`, `Author`, and `ISBN`, stores it, and returns a unique `BookId`.
-- **GET `/books/{id}`**: Fetches the details of the book using the `BookId`.
+- **GET `/books/{id}`**: Fetches book details using `BookId`.
 
-Here’s how the **Program.cs** file for the Book Inventory API might look. Note that instead of a database, we use an in memory dictionary. This is just to avoid distractions and keep focus on the integration testing.
+Here’s the `Program.cs` file for the API, using an in-memory dictionary instead of a database:
 
 ```csharp
 using System.Collections.Concurrent;
@@ -40,12 +42,17 @@ var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
 var books = new ConcurrentDictionary<string, Book>();
-var baseUrl = builder.Configuration["BaseUrl"];
 
 app.MapPost("/addBook", (AddBookRequest request) =>
 {
     var bookId = Guid.NewGuid().ToString();
-    books[bookId] = new Book(request.Title, request.Author, request.ISBN);
+    var book = new Book(request.Title, request.Author, request.ISBN);
+
+    if (!books.TryAdd(bookId, book))
+    {
+        return Results.Problem("Failed to add book due to a concurrency issue.");
+    }
+
     return Results.Ok(new AddBookResponse(bookId));
 });
 
@@ -55,7 +62,7 @@ app.MapGet("/books/{id}", (string id) =>
     {
         return Results.Ok(book);
     }
-    return Results.NotFound();
+    return Results.NotFound(new { Message = "Book not found", BookId = id });
 });
 
 app.Run();
@@ -72,9 +79,7 @@ public partial class Program { }
 
 ## Writing Integration Tests
 
-Integration tests ensure the API works as expected when all components (like endpoints, middleware, and dependencies) are combined. For our Book Inventory API, testing the POST and GET endpoints verifies that:
-
-Using **xUnit**, **WebApplicationFactory**, and **FluentAssertions**, here’s how you can test the Book Inventory API:
+Integration tests verify that all components work together as expected. We’ll use **xUnit**, **WebApplicationFactory**, and **FluentAssertions**.
 
 ### Test File: `BookInventoryTests.cs`
 
@@ -104,14 +109,14 @@ public class BookInventoryTests : IClassFixture<WebApplicationFactory<Program>>
 
         response.EnsureSuccessStatusCode();
         var result = await response.DeserializeAsync<AddBookResponse>();
-        result.Should().NotBeNull();
+        result?.Should().NotBeNull();
         result!.BookId.Should().NotBeNullOrEmpty();
     }
 
     [Fact]
     public async Task GetBook_ReturnsBookDetails()
     {
-        var addRequest = new AddBookRequest("AI Engineering", "Chip Huyen", "1098166302");
+        var addRequest = new AddBookRequest("AI Engineering", "Chip Huyen", "1234567890");
         var addResponse = await _client.PostAsync("/addBook", addRequest.GetHttpContent());
         var bookId = (await addResponse.DeserializeAsync<AddBookResponse>())?.BookId;
 
@@ -119,10 +124,11 @@ public class BookInventoryTests : IClassFixture<WebApplicationFactory<Program>>
 
         getResponse.EnsureSuccessStatusCode();
         var book = await getResponse.DeserializeAsync<Book>();
-        book.Should().NotBeNull();
-        book!.Title.Should().Be(addRequest.Title);
-        book.Author.Should().Be(addRequest.Author);
-        book.ISBN.Should().Be(addRequest.ISBN);
+        book.Should().BeEquivalentTo(
+            new Book(
+                addRequest.Title,
+                addRequest.Author,
+                addRequest.ISBN));
     }
 }
 ```
@@ -131,7 +137,7 @@ public class BookInventoryTests : IClassFixture<WebApplicationFactory<Program>>
 
 ## Sweet and Useful: Extension Methods
 
-Simplify repetitive tasks in your tests using extension methods for handling HTTP content. Here’s an example:
+Avoid clutter in your tests using extension methods for handling HTTP content:
 
 ```csharp
 using System.Text;
@@ -160,34 +166,13 @@ public static class HttpContentExtensions
 }
 ```
 
-I use these methods in my tests for streamlined serialization and deserialization of HTTP content, as you can see in the lines below:
-
-```csharp
-var request = new AddBookRequest("AI Engineering", "Chip Huyen", "1098166302");
-var content = request.GetHttpContent();
-```
-
-or here:
-
-```csharp
-var book = await getResponse.DeserializeAsync<Book>();
-```
-
-This helps me to avoid a lot of clutter.
-
 ---
 
 ## Manual Testing: Using REST Client and `.http` Files
 
 Visual Studio Code’s **REST Client** extension simplifies manual testing. Define requests in `.http` files like this:
 
-### `.http` File Example:
-
 ```http
-# Base URL
-@baseUrl = http://localhost:5000
-
-# Test POST /addBook
 POST {{baseUrl}}/addBook HTTP/1.1
 Content-Type: application/json
 
@@ -204,8 +189,17 @@ GET {{baseUrl}}/books/{id} HTTP/1.1
 Accept: application/json
 ```
 
-Execute these requests directly in VS Code using the REST Client extension, with responses displayed right in the editor.
+---
 
 ## Conclusion
 
-TODO:
+We’ve explored how to write and test a minimal web API in ASP.NET using integration tests and manual `.http` files. Key takeaways:
+
+- Use `WebApplicationFactory` to create an in-memory test server.
+- Leverage `FluentAssertions` for clean, readable assertions.
+- Reduce boilerplate in tests with extension methods.
+- Use VS Code’s REST Client for quick manual testing.
+
+If you found this useful, check out the full source code on GitHub [here](https://github.com/dorinandreidragan/nbdotnet/tree/main/aspnet/BooksInventory).
+
+Happy coding! 🚀

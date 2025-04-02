@@ -4,12 +4,17 @@ var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
 var books = new ConcurrentDictionary<string, Book>();
-var baseUrl = builder.Configuration["BaseUrl"];
 
 app.MapPost("/addBook", (AddBookRequest request) =>
 {
     var bookId = Guid.NewGuid().ToString();
-    books[bookId] = new Book(request.Title, request.Author, request.ISBN);
+    var book = new Book(request.Title, request.Author, request.ISBN);
+
+    if (!books.TryAdd(bookId, book))
+    {
+        return Results.Problem("Failed to add book due to a concurrency issue.");
+    }
+
     return Results.Ok(new AddBookResponse(bookId));
 });
 
@@ -19,7 +24,7 @@ app.MapGet("/books/{id}", (string id) =>
     {
         return Results.Ok(book);
     }
-    return Results.NotFound();
+    return Results.NotFound(new { Message = "Book not found", BookId = id });
 });
 
 app.Run();
